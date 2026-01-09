@@ -8,7 +8,9 @@
 #import "KuaiShouIconScreenSaverView.h"
 #import <CoreGraphics/CoreGraphics.h>
 
-@implementation KuaiShouIconScreenSaverView
+@implementation KuaiShouIconScreenSaverView {
+    NSTimeInterval _shapeSwitchTime; // 用于特殊位置图形切换的时间变量
+}
 
 // 快手橙色 RGB(255, 85, 0)
 #define KUAI_SHOU_ORANGE_R 253.0/255.0
@@ -33,7 +35,8 @@
 {
     self = [super initWithFrame:frame isPreview:isPreview];
     if (self) {
-        [self setAnimationTimeInterval:10.0];
+        [self setAnimationTimeInterval:0.05]; // 改为0.05秒更新一次（20fps），以便实现平滑的morphing过渡
+        _shapeSwitchTime = 0.0; // 初始化图形切换时间
     }
     return self;
 }
@@ -113,7 +116,7 @@
     NSBezierPath *circle = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(center.x - smallSize/2, center.y - smallSize/2, smallSize, smallSize)];
     
     // 使用深灰色填充（更接近黑色）
-    [[NSColor colorWithWhite:0.2 alpha:1.0] setFill];
+    [[NSColor colorWithWhite:0.2 alpha:0.6] setFill];
     [circle fill];
 }
 
@@ -262,7 +265,12 @@
 - (void)drawShapeAtIndex:(NSInteger)index atPoint:(NSPoint)point size:(CGFloat)size filled:(BOOL)filled
 {
     NSInteger shapeType = index % SHAPE_TYPES;
-    
+    [self drawShapeType:shapeType atPoint:point size:size filled:filled];
+}
+
+// 根据图形类型直接绘制图形（用于Morphing动画）
+- (void)drawShapeType:(NSInteger)shapeType atPoint:(NSPoint)point size:(CGFloat)size filled:(BOOL)filled
+{
     switch (shapeType) {
         case 0: // 大圆
             [self drawLargeCircleAtPoint:point size:size filled:filled];
@@ -361,33 +369,92 @@
         return;
     }
     
-    // 绘制所有图形（允许超出720）
-    NSInteger totalCells = cols * rows;
-    for (NSInteger i = 0; i < totalCells; i++) {
-        NSInteger row = i / cols;
-        NSInteger col = i % cols;
+        // 计算当前最后一个isPast的位置
+        // 如果超过22:00（currentMinute >= 720），则固定为第720个位置（索引719）
+        NSInteger lastPastIndex = MIN(currentMinute, TOTAL_SHAPES - 1);
         
-        // 反转y坐标，让row=0对应顶部，row=rows-1对应底部（macOS坐标系y从下往上）
-        NSPoint center = NSMakePoint(
-            margin + col * cellWidth + cellWidth / 2,
-            margin + (rows - 1 - row) * cellHeight + cellHeight / 2
-        );
-        
-        // 如果超出720，绘制灰色填充的小圆
-        if (i >= TOTAL_SHAPES) {
-            [self drawGraySmallCircleAtPoint:center size:shapeSize];
-        } else {
-            // 判断是否已过去（包括当前分钟）
-            // 如果当前是10:00，第一个图形（索引0）应该被填充
-            BOOL isPast = (i <= currentMinute);
+        // 绘制所有图形（允许超出720）
+        NSInteger totalCells = cols * rows;
+        for (NSInteger i = 0; i < totalCells; i++) {
+            NSInteger row = i / cols;
+            NSInteger col = i % cols;
             
-            [self drawShapeAtIndex:i atPoint:center size:shapeSize filled:isPast];
+            // 反转y坐标，让row=0对应顶部，row=rows-1对应底部（macOS坐标系y从下往上）
+            NSPoint center = NSMakePoint(
+                margin + col * cellWidth + cellWidth / 2,
+                margin + (rows - 1 - row) * cellHeight + cellHeight / 2
+            );
+            
+            // 如果超出720，绘制灰色填充的小圆
+            if (i >= TOTAL_SHAPES) {
+                [self drawGraySmallCircleAtPoint:center size:shapeSize];
+            } else {
+                // 判断是否已过去（包括当前分钟）
+                // 如果当前是10:00，第一个图形（索引0）应该被填充
+                BOOL isPast = (i <= currentMinute);
+                
+                // 在当前最后一个isPast的位置应用图形循环切换动效（带Morphing过渡）
+                if (i == lastPastIndex && isPast) {
+                    // 计算当前应该显示的图形类型（0-3循环，每1秒一个周期）
+                    NSInteger currentShapeType = ((NSInteger)_shapeSwitchTime) % SHAPE_TYPES;
+                    NSInteger nextShapeType = (currentShapeType + 1) % SHAPE_TYPES;
+                    
+                    // 计算当前周期内的进度（0.0到1.0）
+                    CGFloat cycleProgress = fmod(_shapeSwitchTime, 1.0);
+                    
+                    // 每个图形显示0.6秒，剩余0.4秒用于过渡
+                    CGFloat displayDuration = 0.6;
+                    CGFloat morphDuration = 0.4;
+                    
+                    if (cycleProgress < displayDuration) {
+                        // 前0.6秒：正常显示当前图形
+                        [self drawShapeType:currentShapeType atPoint:center size:shapeSize filled:isPast];
+                    } else {
+                        // 后0.4秒：进行Morphing过渡
+                        CGFloat morphProgress = (cycleProgress - displayDuration) / morphDuration; // 0.0到1.0
+                        
+                        // 使用缓动函数（ease-in-out）让过渡更自然
+                        CGFloat easedProgress = morphProgress < 0.5 
+                            ? 2.0 * morphProgress * morphProgress 
+                            : 1.0 - pow(-2.0 * morphProgress + 2.0, 2.0) / 2.0;
+                        
+                        // 前一个图形逐渐淡出并缩小
+                        CGFloat prevAlpha = 1.0 - easedProgress;
+                        CGFloat prevScale = 1.0 - easedProgress * 0.2; // 缩小到80%
+                        
+                        // 后一个图形逐渐淡入并放大
+                        CGFloat nextAlpha = easedProgress;
+                        CGFloat nextScale = 0.8 + easedProgress * 0.2; // 从80%放大到100%
+                        
+                        // 获取当前图形上下文
+                        CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
+                        
+                        // 保存图形上下文状态
+                        CGContextSaveGState(context);
+                        
+                        // 绘制前一个图形（淡出）
+                        CGContextSetAlpha(context, prevAlpha);
+                        [self drawShapeType:currentShapeType atPoint:center size:shapeSize * prevScale filled:isPast];
+                        
+                        // 绘制后一个图形（淡入）
+                        CGContextSetAlpha(context, nextAlpha);
+                        [self drawShapeType:nextShapeType atPoint:center size:shapeSize * nextScale filled:isPast];
+                        
+                        // 恢复图形上下文状态
+                        CGContextRestoreGState(context);
+                    }
+                } else {
+                    // 其他图形正常绘制
+                    [self drawShapeAtIndex:i atPoint:center size:shapeSize filled:isPast];
+                }
+            }
         }
-    }
 }
 
 - (void)animateOneFrame
 {
+    // 更新图形切换时间（每0.05秒更新一次，每1秒切换一次图形，4个图形循环）
+    _shapeSwitchTime += 0.05;
     [self setNeedsDisplay:YES];
 }
 

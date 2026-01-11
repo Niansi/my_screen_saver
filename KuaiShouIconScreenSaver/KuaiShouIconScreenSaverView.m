@@ -10,7 +10,12 @@
 
 @implementation KuaiShouIconScreenSaverView {
     NSTimeInterval _shapeSwitchTime; // 用于特殊位置图形切换的时间变量
+    NSWindow *_configureWindow; // 配置窗口
+    NSButton *_enableAnimationCheckbox; // 启用动效的复选框
 }
+
+// 设置项的键名
+static NSString * const kEnableAnimationKey = @"EnableAnimation";
 
 // 快手橙色 RGB(255, 85, 0)
 #define KUAI_SHOU_ORANGE_R 253.0/255.0
@@ -39,6 +44,16 @@
         _shapeSwitchTime = 0.0; // 初始化图形切换时间
     }
     return self;
+}
+
+// 获取是否启用动效设置（默认启用）
+- (BOOL)isAnimationEnabled
+{
+    NSUserDefaults *defaults = [ScreenSaverDefaults defaultsForModuleWithName:@"KuaiShouIconScreenSaver"];
+    if ([defaults objectForKey:kEnableAnimationKey] == nil) {
+        return YES; // 默认启用
+    }
+    return [defaults boolForKey:kEnableAnimationKey];
 }
 
 - (void)startAnimation
@@ -395,6 +410,7 @@
                 
                 // 在当前最后一个isPast的位置应用图形循环切换动效（带Morphing过渡）
                 if (i == lastPastIndex && isPast) {
+                    if ([self isAnimationEnabled]) {
                     // 计算当前应该显示的图形类型（0-3循环，每1秒一个周期）
                     NSInteger currentShapeType = ((NSInteger)_shapeSwitchTime) % SHAPE_TYPES;
                     NSInteger nextShapeType = (currentShapeType + 1) % SHAPE_TYPES;
@@ -443,6 +459,10 @@
                         // 恢复图形上下文状态
                         CGContextRestoreGState(context);
                     }
+                    } else {
+                        // 动效未启用时，正常绘制当前图形
+                        [self drawShapeAtIndex:i atPoint:center size:shapeSize filled:isPast];
+                    }
                 } else {
                     // 其他图形正常绘制
                     [self drawShapeAtIndex:i atPoint:center size:shapeSize filled:isPast];
@@ -460,12 +480,105 @@
 
 - (BOOL)hasConfigureSheet
 {
-    return NO;
+    return YES;
 }
 
 - (NSWindow*)configureSheet
 {
-    return nil;
+    // 如果窗口已存在且仍然可见，直接返回
+    if (_configureWindow && [_configureWindow isVisible]) {
+        return _configureWindow;
+    }
+    
+    // 如果窗口已存在但不可见，清理子视图以便重新使用
+    if (_configureWindow) {
+        NSArray *subviews = [[_configureWindow.contentView subviews] copy];
+        for (NSView *subview in subviews) {
+            [subview removeFromSuperview];
+        }
+    } else {
+        // 创建配置窗口
+        NSRect windowRect = NSMakeRect(0, 0, 400, 200);
+        _configureWindow = [[NSWindow alloc] initWithContentRect:windowRect
+                                                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
+        [_configureWindow setTitle:@"快手图标屏保设置"];
+        [_configureWindow center];
+    }
+    
+    // 创建容器视图
+    NSView *contentView = _configureWindow.contentView;
+    
+    // 创建复选框
+    _enableAnimationCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(20, 120, 360, 30)];
+    [_enableAnimationCheckbox setButtonType:NSButtonTypeSwitch];
+    [_enableAnimationCheckbox setTitle:@"启用动态效果（图形循环切换和Morphing过渡）"];
+    [_enableAnimationCheckbox setState:[self isAnimationEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+    [_enableAnimationCheckbox setTarget:self];
+    [_enableAnimationCheckbox setAction:@selector(enableAnimationChanged:)];
+    [contentView addSubview:_enableAnimationCheckbox];
+    
+    // 创建说明文本
+    NSTextField *descriptionLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 60, 360, 50)];
+    [descriptionLabel setStringValue:@"动态效果会在当前最后一个被填充的图形位置显示循环切换动画，每1秒切换一次，包含平滑的Morphing过渡效果。"];
+    [descriptionLabel setBezeled:NO];
+    [descriptionLabel setDrawsBackground:NO];
+    [descriptionLabel setEditable:NO];
+    [descriptionLabel setSelectable:NO];
+    [descriptionLabel setFont:[NSFont systemFontOfSize:11]];
+    [descriptionLabel setTextColor:[NSColor secondaryLabelColor]];
+    [descriptionLabel setAlignment:NSTextAlignmentLeft];
+    [[descriptionLabel cell] setLineBreakMode:NSLineBreakByWordWrapping];
+    [contentView addSubview:descriptionLabel];
+    
+    // 创建确定按钮
+    NSButton *okButton = [[NSButton alloc] initWithFrame:NSMakeRect(240, 20, 80, 32)];
+    [okButton setTitle:@"确定"];
+    [okButton setButtonType:NSButtonTypeMomentaryPushIn];
+    [okButton setBezelStyle:NSBezelStyleRounded];
+    [okButton setTarget:self];
+    [okButton setAction:@selector(okButtonClicked:)];
+    [contentView addSubview:okButton];
+    
+    // 创建取消按钮
+    NSButton *cancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(320, 20, 80, 32)];
+    [cancelButton setTitle:@"取消"];
+    [cancelButton setButtonType:NSButtonTypeMomentaryPushIn];
+    [cancelButton setBezelStyle:NSBezelStyleRounded];
+    [cancelButton setTarget:self];
+    [cancelButton setAction:@selector(cancelButtonClicked:)];
+    [contentView addSubview:cancelButton];
+    
+    return _configureWindow;
+}
+
+// 复选框状态改变
+- (void)enableAnimationChanged:(id)sender
+{
+    // 实时更新设置（但不保存，直到点击确定）
+}
+
+// 确定按钮点击
+- (void)okButtonClicked:(id)sender
+{
+    // 保存设置
+    NSUserDefaults *defaults = [ScreenSaverDefaults defaultsForModuleWithName:@"KuaiShouIconScreenSaver"];
+    [defaults setBool:([_enableAnimationCheckbox state] == NSControlStateValueOn) forKey:kEnableAnimationKey];
+    [defaults synchronize];
+    
+    // 关闭sheet窗口（只调用endSheet，不要调用close，也不要设置为nil）
+    [NSApp endSheet:_configureWindow returnCode:NSModalResponseOK];
+    
+    // 触发重绘
+    [self setNeedsDisplay:YES];
+}
+
+// 取消按钮点击
+- (void)cancelButtonClicked:(id)sender
+{
+    // 关闭sheet窗口，不保存设置（只调用endSheet，不要调用close，也不要设置为nil）
+    [NSApp endSheet:_configureWindow returnCode:NSModalResponseCancel];
 }
 
 @end

@@ -14,6 +14,16 @@
     NSButton *_enableAnimationCheckbox; // 启用动效的复选框
 }
 
+// 节日结构
+typedef struct {
+    NSInteger month;
+    NSInteger day;
+    BOOL isLunar; // 是否为农历
+    NSInteger weekDay; // 周几（0=周日，1=周一...），-1表示不限制
+    NSInteger weekOrdinal; // 第几个周几（如第2个周日），-1表示不限制
+    NSArray<NSString *> *emojis; // emoji数组
+} FestivalInfo;
+
 // 设置项的键名
 static NSString * const kEnableAnimationKey = @"EnableAnimation";
 
@@ -92,6 +102,205 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     NSInteger totalMinutes = (currentHour - START_HOUR) * 60 + currentMinute;
     
     return totalMinutes;
+}
+
+// 获取农历日期
+- (NSDateComponents *)getLunarDateComponents:(NSDate *)date
+{
+    NSCalendar *chineseCalendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierChinese];
+    NSDateComponents *components = [chineseCalendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:date];
+    return components;
+}
+
+// 获取阳历日期
+- (NSDateComponents *)getSolarDateComponents:(NSDate *)date
+{
+    NSCalendar *calendar = [NSCalendar currentCalendar];
+    NSDateComponents *components = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay | NSCalendarUnitWeekday fromDate:date];
+    return components;
+}
+
+// 计算某个月的第N个周几
+- (NSInteger)getWeekOrdinalForDate:(NSDate *)date
+{
+    NSCalendar *calendar = [NSCalendar currentCalendar];
+    NSDateComponents *components = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay | NSCalendarUnitWeekday fromDate:date];
+    
+    NSInteger year = [components year];
+    NSInteger month = [components month];
+    NSInteger day = [components day];
+    NSInteger weekday = [components weekday]; // 1=周日，2=周一...
+    
+    // 计算该月第一天是周几
+    NSDateComponents *firstDayComponents = [[NSDateComponents alloc] init];
+    [firstDayComponents setYear:year];
+    [firstDayComponents setMonth:month];
+    [firstDayComponents setDay:1];
+    NSDate *firstDay = [calendar dateFromComponents:firstDayComponents];
+    NSDateComponents *firstDayComps = [calendar components:NSCalendarUnitWeekday fromDate:firstDay];
+    NSInteger firstWeekday = [firstDayComps weekday]; // 1=周日，2=周一...
+    
+    // 计算第一个目标周几出现在该月的第几天
+    // 如果目标周几 >= 第一天周几，则第一个目标周几 = (目标周几 - 第一天周几) + 1
+    // 如果目标周几 < 第一天周几，则第一个目标周几 = (7 - 第一天周几) + 目标周几 + 1
+    NSInteger firstTargetDay;
+    if (weekday >= firstWeekday) {
+        firstTargetDay = (weekday - firstWeekday) + 1;
+    } else {
+        firstTargetDay = (7 - firstWeekday) + weekday + 1;
+    }
+    
+    // 计算当前日期是第几个目标周几
+    NSInteger weekOrdinal = (day - firstTargetDay) / 7 + 1;
+    
+    return weekOrdinal;
+}
+
+// 检测今天是否是节日，返回对应的emoji数组（支持多个节日同时匹配）
+- (NSArray<NSString *> *)getFestivalEmojis
+{
+    // 测试模式：如果当前不是任何节日，显示测试emoji（可以删除或注释掉）
+    // 为了确保今天能看到效果，可以临时启用这个测试模式
+    BOOL enableTestMode = YES; // 设置为NO可以禁用测试模式
+    
+    NSDate *now = [NSDate date];
+    NSDateComponents *solarComponents = [self getSolarDateComponents:now];
+    NSDateComponents *lunarComponents = [self getLunarDateComponents:now];
+    
+    NSInteger solarMonth = [solarComponents month];
+    NSInteger solarDay = [solarComponents day];
+    NSInteger solarWeekday = [solarComponents weekday]; // 1=周日，2=周一...
+    NSInteger solarWeekOrdinal = [self getWeekOrdinalForDate:now];
+    
+    NSInteger lunarMonth = [lunarComponents month];
+    NSInteger lunarDay = [lunarComponents day];
+    
+    // 使用可变数组收集所有匹配的节日emoji
+    NSMutableArray<NSString *> *emojis = [NSMutableArray array];
+    
+    // 定义节日列表（按时间顺序检查，支持多个节日同时匹配）
+    // 1月1日 元旦 🎉⏰
+    if (solarMonth == 1 && solarDay == 1) {
+        [emojis addObjectsFromArray:@[@"🎉", @"🥂", @"🎆"]];
+    }
+
+    // 农历正月初一 春节 🧨🎇🍲
+    if (lunarMonth == 1 && lunarDay == 1) {
+        [emojis addObjectsFromArray:@[@"🧨", @"🏮", @"🥟"]];
+    }
+    
+    // 农历2月14日 情人节 ❤️🌹💌
+    if (lunarMonth == 2 && lunarDay == 14) {
+        [emojis addObjectsFromArray:@[@"❤️", @"🌹", @"💌"]];
+    }
+    
+    // 3月12日 植树节 🌳🌱🌏
+    if (solarMonth == 3 && solarDay == 12) {
+        [emojis addObjectsFromArray:@[@"🌳", @"🌱", @"🌏"]];
+    }
+    
+    // 5月1日 劳动节 🛠️💼🌸
+    if (solarMonth == 5 && solarDay == 1) {
+        [emojis addObjectsFromArray:@[@"🛠️", @"💼", @"🌸"]];
+    }
+    
+    // 5月4日 青年节 🏃‍♂️🌟
+    if (solarMonth == 5 && solarDay == 4) {
+        [emojis addObjectsFromArray:@[@"🏃‍♂️", @"🌟", @"💪"]];
+    }
+    
+    // 5月第2个周日 母亲节 👩‍🦰💐❤️
+    if (solarMonth == 5 && solarWeekday == 1 && solarWeekOrdinal == 2) {
+        [emojis addObjectsFromArray:@[@"👩‍🦰", @"💐", @"❤️"]];
+    }
+    
+    // 6月1日 儿童节 🧸🎈🍭
+    if (solarMonth == 6 && solarDay == 1) {
+        [emojis addObjectsFromArray:@[@"🧸", @"🎈", @"🍭"]];
+    }
+    
+    // 6月第3个周日 父亲节 👨‍🦱🛠️💙
+    if (solarMonth == 6 && solarWeekday == 1 && solarWeekOrdinal == 3) {
+        [emojis addObjectsFromArray:@[@"👨‍🦱", @"🛠️", @"💙"]];
+    }
+    
+    // 农历五月初五 端午节 🌾🛶
+    if (lunarMonth == 5 && lunarDay == 5) {
+        [emojis addObjectsFromArray:@[@"🌾", @"🛶", @"🍙"]];
+    }
+    
+    // 农历七月初七 七夕节 💕🌌🎋
+    if (lunarMonth == 7 && lunarDay == 7) {
+        [emojis addObjectsFromArray:@[@"💕", @"🌌", @"🎋"]];
+    }
+    
+    // 农历八月十五 中秋节 🌕🥮🏮
+    if (lunarMonth == 8 && lunarDay == 15) {
+        [emojis addObjectsFromArray:@[@"🥮", @"🌕", @"🐇"]];
+    }
+    
+    // 9月10日 教师节 👩‍🏫🍎📚
+    if (solarMonth == 9 && solarDay == 10) {
+        [emojis addObjectsFromArray:@[@"👩‍🏫", @"🎓", @"📚"]];
+    }
+    
+    // 农历九月初九 重阳节 🏔️🎗️☕
+    if (lunarMonth == 9 && lunarDay == 9) {
+        [emojis addObjectsFromArray:@[@"🏔️", @"🌼", @"🍵"]];
+    }
+    
+    // 10月1日 国庆节 🇨🇳🎇🏞️
+    if (solarMonth == 10 && solarDay == 1) {
+        [emojis addObjectsFromArray:@[@"🇨🇳", @"🎇", @"🏮"]];
+    }
+    
+    // 10月31日 万圣节 🎃👻🕸️
+    if (solarMonth == 10 && solarDay == 31) {
+        [emojis addObjectsFromArray:@[@"🎃", @"👻", @"🕸️"]];
+    }
+    
+    // 12月25日 圣诞节 🎄🎅❄️
+    if (solarMonth == 12 && solarDay == 25) {
+        [emojis addObjectsFromArray:@[@"🎄", @"🎅", @"❄️"]];
+    }
+    
+    // 农历十二月三十 除夕 🍲🎇🧨
+    if (lunarMonth == 12 && lunarDay == 30) {
+        [emojis addObjectsFromArray:@[@"🍲", @"🎇", @"🧨"]];
+    }
+    
+    // 农历十二月初八 腊八节 🍲🥣
+    if (lunarMonth == 12 && lunarDay == 8) {
+        [emojis addObjectsFromArray:@[@"🍲", @"🥣", @"🌾"]];
+    }
+    
+    // 如果匹配到任何节日，返回合并后的emoji数组
+    if ([emojis count] > 0) {
+        return [emojis copy];
+    }
+    
+    // 测试模式：如果当前不是任何节日，显示测试emoji
+    if (enableTestMode) {
+        return @[@"🎉", @"⏰", @"🧨", @"🏮", @"🥟", @"🍙"]; // 显示元旦的emoji作为测试
+    }
+    
+    return nil;
+}
+
+// 绘制emoji文本
+- (void)drawEmoji:(NSString *)emoji atPoint:(NSPoint)point size:(CGFloat)size alpha:(CGFloat)alpha
+{
+    NSFont *font = [NSFont systemFontOfSize:size];
+    NSColor *textColor = [[NSColor whiteColor] colorWithAlphaComponent:alpha];
+    NSDictionary *attributes = @{
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: textColor
+    };
+    
+    NSSize textSize = [emoji sizeWithAttributes:attributes];
+    NSPoint drawPoint = NSMakePoint(point.x - textSize.width / 2, point.y - textSize.height / 2);
+    
+    [emoji drawAtPoint:drawPoint withAttributes:attributes];
 }
 
 // 绘制大圆
@@ -384,13 +593,20 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
         return;
     }
     
-        // 计算当前最后一个isPast的位置
-        // 如果超过22:00（currentMinute >= 720），则固定为第720个位置（索引719）
-        NSInteger lastPastIndex = MIN(currentMinute, TOTAL_SHAPES - 1);
-        
-        // 绘制所有图形（允许超出720）
-        NSInteger totalCells = cols * rows;
-        for (NSInteger i = 0; i < totalCells; i++) {
+    // 检测节日
+    NSArray<NSString *> *festivalEmojis = [self getFestivalEmojis];
+    BOOL isFestival = (festivalEmojis != nil && festivalEmojis.count > 0);
+    
+    // 计算中心行（1/2行，奇数行时直接取整）
+    NSInteger centerRow = rows / 2; // 如果rows=24，centerRow=12（从0开始是第12行）
+    
+    // 计算当前最后一个isPast的位置
+    // 如果超过22:00（currentMinute >= 720），则固定为第720个位置（索引719）
+    NSInteger lastPastIndex = MIN(currentMinute, TOTAL_SHAPES - 1);
+    
+    // 绘制所有图形（允许超出720）
+    NSInteger totalCells = cols * rows;
+    for (NSInteger i = 0; i < totalCells; i++) {
             NSInteger row = i / cols;
             NSInteger col = i % cols;
             
@@ -399,6 +615,25 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
                 margin + col * cellWidth + cellWidth / 2,
                 margin + (rows - 1 - row) * cellHeight + cellHeight / 2
             );
+            
+            // 如果是节日，在中心行显示emoji
+            if (isFestival && row == centerRow && i < TOTAL_SHAPES) {
+                // 计算这一行中emoji的显示位置（居中显示）
+                NSInteger emojiCount = festivalEmojis.count;
+                NSInteger startCol = (cols - emojiCount) / 2; // 起始列，使emoji居中
+                NSInteger emojiIndex = col - startCol;
+                
+                // 如果当前列在emoji范围内，显示对应的emoji
+                if (emojiIndex >= 0 && emojiIndex < emojiCount) {
+                    NSString *emoji = festivalEmojis[emojiIndex];
+                    CGFloat emojiSize = shapeSize * 1.2; // emoji稍大一些
+                    // 判断当前位置是否已过去，未来时间使用半透明
+                    BOOL isPast = (i <= currentMinute);
+                    CGFloat alpha = isPast ? 1.0 : 0.5; // 过去时间完全不透明，未来时间半透明
+                    [self drawEmoji:emoji atPoint:center size:emojiSize alpha:alpha];
+                    continue; // 跳过默认图形的绘制
+                }
+            }
             
             // 如果超出720，绘制灰色填充的小圆
             if (i >= TOTAL_SHAPES) {
@@ -513,27 +748,14 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     // 创建复选框
     _enableAnimationCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(20, 120, 360, 30)];
     [_enableAnimationCheckbox setButtonType:NSButtonTypeSwitch];
-    [_enableAnimationCheckbox setTitle:@"启用动态效果（图形循环切换和Morphing过渡）"];
+    [_enableAnimationCheckbox setTitle:@"启用动态效果"];
     [_enableAnimationCheckbox setState:[self isAnimationEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
     [_enableAnimationCheckbox setTarget:self];
     [_enableAnimationCheckbox setAction:@selector(enableAnimationChanged:)];
     [contentView addSubview:_enableAnimationCheckbox];
     
-    // 创建说明文本
-    NSTextField *descriptionLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 60, 360, 50)];
-    [descriptionLabel setStringValue:@"动态效果会在当前最后一个被填充的图形位置显示循环切换动画，每1秒切换一次，包含平滑的Morphing过渡效果。"];
-    [descriptionLabel setBezeled:NO];
-    [descriptionLabel setDrawsBackground:NO];
-    [descriptionLabel setEditable:NO];
-    [descriptionLabel setSelectable:NO];
-    [descriptionLabel setFont:[NSFont systemFontOfSize:11]];
-    [descriptionLabel setTextColor:[NSColor secondaryLabelColor]];
-    [descriptionLabel setAlignment:NSTextAlignmentLeft];
-    [[descriptionLabel cell] setLineBreakMode:NSLineBreakByWordWrapping];
-    [contentView addSubview:descriptionLabel];
-    
     // 创建确定按钮
-    NSButton *okButton = [[NSButton alloc] initWithFrame:NSMakeRect(240, 20, 80, 32)];
+    NSButton *okButton = [[NSButton alloc] initWithFrame:NSMakeRect(200, 20, 80, 32)];
     [okButton setTitle:@"确定"];
     [okButton setButtonType:NSButtonTypeMomentaryPushIn];
     [okButton setBezelStyle:NSBezelStyleRounded];
@@ -542,7 +764,7 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     [contentView addSubview:okButton];
     
     // 创建取消按钮
-    NSButton *cancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(320, 20, 80, 32)];
+    NSButton *cancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(290, 20, 80, 32)];
     [cancelButton setTitle:@"取消"];
     [cancelButton setButtonType:NSButtonTypeMomentaryPushIn];
     [cancelButton setBezelStyle:NSBezelStyleRounded];

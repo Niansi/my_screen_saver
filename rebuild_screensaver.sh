@@ -18,16 +18,40 @@ echo "🗑️  删除旧屏保..."
 rm -rf ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver
 
 echo "📦 安装新屏保..."
-BUILD_DIR="/Users/wuxiangyu/Library/Developer/Xcode/DerivedData/KuaiShouIconScreenSaver-aipzokbeybxymkfxhwjolqmoucst/Build/Products/Debug"
+# 动态查找构建产物路径，避免硬编码
+BUILD_DIR=$(xcodebuild -project KuaiShouIconScreenSaver.xcodeproj -scheme KuaiShouIconScreenSaver -configuration Debug -showBuildSettings 2>/dev/null | grep -m 1 "BUILT_PRODUCTS_DIR" | sed 's/.*= *//')
+if [ -z "$BUILD_DIR" ]; then
+    # 如果动态查找失败，尝试使用默认路径
+    BUILD_DIR="/Users/wuxiangyu/Library/Developer/Xcode/DerivedData/KuaiShouIconScreenSaver-aipzokbeybxymkfxhwjolqmoucst/Build/Products/Debug"
+fi
+
 if [ -d "$BUILD_DIR/KuaiShouIconScreenSaver.saver" ]; then
+    echo "   找到构建产物: $BUILD_DIR/KuaiShouIconScreenSaver.saver"
+    # 先删除旧屏保，确保完全清理
+    rm -rf ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver
+    # 复制新屏保
     cp -R "$BUILD_DIR/KuaiShouIconScreenSaver.saver" ~/Library/Screen\ Savers/
+    echo "   ✅ 屏保已安装"
 else
-    echo "❌ 找不到构建产物！"
+    echo "❌ 找不到构建产物！路径: $BUILD_DIR/KuaiShouIconScreenSaver.saver"
     exit 1
 fi
 
 echo "✍️  重新签名..."
 codesign --force --sign - ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver >/dev/null 2>&1
+
+# 验证安装是否成功
+if [ -f ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver/Contents/MacOS/KuaiShouIconScreenSaver ]; then
+    INSTALLED_MD5=$(md5 -q ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver/Contents/MacOS/KuaiShouIconScreenSaver)
+    BUILT_MD5=$(md5 -q "$BUILD_DIR/KuaiShouIconScreenSaver.saver/Contents/MacOS/KuaiShouIconScreenSaver")
+    if [ "$INSTALLED_MD5" = "$BUILT_MD5" ]; then
+        echo "   ✅ MD5验证通过，安装成功"
+    else
+        echo "   ⚠️  警告：MD5不匹配！可能使用了旧版本"
+        echo "   已安装: $INSTALLED_MD5"
+        echo "   新构建: $BUILT_MD5"
+    fi
+fi
 
 echo "🔄 清理屏保和系统设置缓存..."
 killall ScreenSaverEngine 2>/dev/null

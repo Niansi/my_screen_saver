@@ -161,7 +161,7 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
 {
     // 测试模式：如果当前不是任何节日，显示测试emoji（可以删除或注释掉）
     // 为了确保今天能看到效果，可以临时启用这个测试模式
-    BOOL enableTestMode = YES; // 设置为NO可以禁用测试模式
+    BOOL enableTestMode = NO; // 设置为NO可以禁用测试模式
     
     NSDate *now = [NSDate date];
     NSDateComponents *solarComponents = [self getSolarDateComponents:now];

@@ -7,11 +7,14 @@
 
 #import "KuaiShouIconScreenSaverView.h"
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreText/CoreText.h>
 
 @implementation KuaiShouIconScreenSaverView {
     NSTimeInterval _shapeSwitchTime; // 用于特殊位置图形切换的时间变量
     NSWindow *_configureWindow; // 配置窗口
-    NSButton *_enableAnimationCheckbox; // 启用动效的复选框
+    NSButton *_enableAnimationCheckbox; // 启用动效的复选框（快手图标用）
+    NSButton *_showTimeCheckbox; // 显示时间的复选框（Kim年度回顾用）
+    NSPopUpButton *_screenSaverTypePopup; // 屏保类型选择下拉菜单
 }
 
 // 节日结构
@@ -26,6 +29,14 @@ typedef struct {
 
 // 设置项的键名
 static NSString * const kEnableAnimationKey = @"EnableAnimation";
+static NSString * const kScreenSaverTypeKey = @"ScreenSaverType";
+static NSString * const kShowTimeKey = @"ShowTime"; // Kim年度回顾显示时间
+
+// 屏保类型枚举
+typedef NS_ENUM(NSInteger, ScreenSaverType) {
+    ScreenSaverTypeKuaiShouIcon = 0,  // 快手图标
+    ScreenSaverTypeKimAnnualReview = 1 // Kim年度回顾
+};
 
 // 快手橙色 RGB(255, 85, 0)
 #define KUAI_SHOU_ORANGE_R 253.0/255.0
@@ -64,6 +75,26 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
         return YES; // 默认启用
     }
     return [defaults boolForKey:kEnableAnimationKey];
+}
+
+// 获取显示时间设置（Kim年度回顾专用，默认开启）
+- (BOOL)isShowTimeEnabled
+{
+    NSUserDefaults *defaults = [ScreenSaverDefaults defaultsForModuleWithName:@"KuaiShouIconScreenSaver"];
+    if ([defaults objectForKey:kShowTimeKey] == nil) {
+        return YES; // 默认启用
+    }
+    return [defaults boolForKey:kShowTimeKey];
+}
+
+// 获取屏保类型设置（默认为快手图标）
+- (ScreenSaverType)screenSaverType
+{
+    NSUserDefaults *defaults = [ScreenSaverDefaults defaultsForModuleWithName:@"KuaiShouIconScreenSaver"];
+    if ([defaults objectForKey:kScreenSaverTypeKey] == nil) {
+        return ScreenSaverTypeKuaiShouIcon; // 默认快手图标
+    }
+    return (ScreenSaverType)[defaults integerForKey:kScreenSaverTypeKey];
 }
 
 - (void)startAnimation
@@ -511,12 +542,50 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     }
 }
 
+// HSL颜色转换为NSColor
+- (NSColor *)colorFromHSLWithHue:(CGFloat)hue saturation:(CGFloat)saturation lightness:(CGFloat)lightness
+{
+    // HSL转RGB算法
+    CGFloat c = (1.0 - fabs(2.0 * lightness - 1.0)) * saturation;
+    CGFloat x = c * (1.0 - fabs(fmod(hue / 60.0, 2.0) - 1.0));
+    CGFloat m = lightness - c / 2.0;
+    
+    CGFloat r, g, b;
+    if (hue < 60.0) {
+        r = c; g = x; b = 0.0;
+    } else if (hue < 120.0) {
+        r = x; g = c; b = 0.0;
+    } else if (hue < 180.0) {
+        r = 0.0; g = c; b = x;
+    } else if (hue < 240.0) {
+        r = 0.0; g = x; b = c;
+    } else if (hue < 300.0) {
+        r = x; g = 0.0; b = c;
+    } else {
+        r = c; g = 0.0; b = x;
+    }
+    
+    return [NSColor colorWithRed:(r + m) green:(g + m) blue:(b + m) alpha:1.0];
+}
+
 - (void)drawRect:(NSRect)rect
 {
     // 设置黑色背景
     [[NSColor blackColor] setFill];
     NSRectFill(rect);
     
+    // 根据屏保类型调用不同的绘制方法
+    ScreenSaverType type = [self screenSaverType];
+    if (type == ScreenSaverTypeKimAnnualReview) {
+        [self drawKimAnnualReviewStyle:rect];
+    } else {
+        [self drawKuaiShouIconStyle:rect];
+    }
+}
+
+// 绘制快手图标样式
+- (void)drawKuaiShouIconStyle:(NSRect)rect
+{
     // 获取当前时间对应的分钟数
     NSInteger currentMinute = [self currentMinuteFromStart];
     
@@ -706,6 +775,202 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
         }
 }
 
+// 绘制Kim年度回顾样式
+- (void)drawKimAnnualReviewStyle:(NSRect)rect
+{
+    NSRect bounds = [self bounds];
+    
+    // 检查bounds是否有效
+    if (bounds.size.width <= 0 || bounds.size.height <= 0) {
+        return;
+    }
+    
+    // 判断屏幕方向：横屏或竖屏
+    BOOL isLandscape = bounds.size.width > bounds.size.height;
+    NSInteger stripeCount = isLandscape ? 5 : 9;
+    
+    // HSL渐变参数
+    // 起始颜色（顶部，浅色）：HSL(38, 80%, 93%)
+    CGFloat startHue = 38.0;
+    CGFloat startSaturation = 80.0;
+    CGFloat startLightness = 93.0;
+    // 结束颜色（底部，深色）：HSL(30, 68%, 52%)
+    CGFloat endHue = 30.0;
+    CGFloat endSaturation = 68.0;
+    CGFloat endLightness = 52.0;
+    
+    // 计算每个条纹的基础高度（可见部分）
+    CGFloat baseStripeHeight = bounds.size.height / stripeCount;
+    CGFloat cornerRadius = baseStripeHeight * 0.35; // 圆角半径约为条高度的35%
+    
+    // 从上到下绘制每个条纹（i=0是最上面，i=stripeCount-1是最下面）
+    for (NSInteger i = 0; i < stripeCount; i++) {
+        // 计算当前条纹的HSL值（从上到下，i从0到stripeCount-1，颜色从浅到深）
+        CGFloat progress = (CGFloat)i / (CGFloat)(stripeCount - 1);
+        CGFloat hue = startHue - (startHue - endHue) * progress;
+        CGFloat saturation = startSaturation - (startSaturation - endSaturation) * progress;
+        CGFloat lightness = startLightness - (startLightness - endLightness) * progress;
+        
+        // 转换为NSColor
+        NSColor *stripeColor = [self colorFromHSLWithHue:hue saturation:saturation / 100.0 lightness:lightness / 100.0];
+        
+        // 计算条纹的位置（从上到下）
+        // 在macOS坐标系中，y=0在底部，y值越大越靠上
+        // 第i个条纹的顶部距离屏幕顶部 = i * baseStripeHeight
+        CGFloat topY = bounds.origin.y + bounds.size.height - i * baseStripeHeight;
+        
+        // 条纹延伸到屏幕底部（确保完全覆盖，不会有间隙）
+        CGFloat bottomY = bounds.origin.y;
+        
+        CGFloat leftX = bounds.origin.x;
+        CGFloat rightX = bounds.origin.x + bounds.size.width;
+        
+        // 创建路径
+        NSBezierPath *path = [NSBezierPath bezierPath];
+        
+        // 判断是否是第一条（最上面的）
+        BOOL isFirstStripe = (i == 0);
+        
+        if (isFirstStripe) {
+            // 第一条：无圆角，直接填充整个屏幕从顶部到底部
+            [path appendBezierPathWithRect:NSMakeRect(leftX, bottomY, rightX - leftX, topY - bottomY)];
+        } else {
+            // 其他条：左上和右上大圆角，左下和右下直角
+            // 使用 appendBezierPathWithRoundedRect 然后裁剪底部圆角的方式太复杂
+            // 直接手动绘制路径
+            
+            // 从左下角开始，逆时针绘制
+            [path moveToPoint:NSMakePoint(leftX, bottomY)];
+            
+            // 左边向上（直线）
+            [path lineToPoint:NSMakePoint(leftX, topY - cornerRadius)];
+            
+            // 左上角圆角（使用圆弧）
+            [path appendBezierPathWithArcFromPoint:NSMakePoint(leftX, topY)
+                                           toPoint:NSMakePoint(leftX + cornerRadius, topY)
+                                            radius:cornerRadius];
+            
+            // 顶部边（从左到右）
+            [path lineToPoint:NSMakePoint(rightX - cornerRadius, topY)];
+            
+            // 右上角圆角（使用圆弧）
+            [path appendBezierPathWithArcFromPoint:NSMakePoint(rightX, topY)
+                                           toPoint:NSMakePoint(rightX, topY - cornerRadius)
+                                            radius:cornerRadius];
+            
+            // 右边向下（直线）
+            [path lineToPoint:NSMakePoint(rightX, bottomY)];
+            
+            // 底部边（从右到左）
+            [path lineToPoint:NSMakePoint(leftX, bottomY)];
+            
+            [path closePath];
+        }
+        
+        // 填充颜色
+        [stripeColor setFill];
+        [path fill];
+    }
+    
+    // 绘制时间（如果启用）
+    if ([self isShowTimeEnabled]) {
+        [self drawTimeOnKimAnnualReview:bounds stripeCount:stripeCount baseStripeHeight:baseStripeHeight];
+    }
+}
+
+// 在Kim年度回顾屏保上绘制渐变时间
+- (void)drawTimeOnKimAnnualReview:(NSRect)bounds stripeCount:(NSInteger)stripeCount baseStripeHeight:(CGFloat)baseStripeHeight
+{
+    // 获取当前时间
+    NSDate *now = [NSDate date];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:@"HH:mm"];
+    NSString *timeString = [formatter stringFromDate:now];
+    
+    // 计算中间条纹的索引
+    NSInteger middleStripeIndex = stripeCount / 2;
+    
+    // 计算中间条纹的位置（用于居中时间）
+    CGFloat middleStripeTopY = bounds.origin.y + bounds.size.height - middleStripeIndex * baseStripeHeight;
+    CGFloat middleStripeCenterY = middleStripeTopY - baseStripeHeight / 2;
+    
+    // 字体大小为95%的条纹高度
+    CGFloat fontSize = baseStripeHeight * 0.95;
+    
+    // 创建字体（使用 Arial Rounded MT Bold）
+    NSFont *font = [NSFont fontWithName:@"ArialRoundedMTBold" size:fontSize];
+    if (!font) {
+        // 备用：尝试其他名称格式
+        font = [NSFont fontWithName:@"Arial Rounded MT Bold" size:fontSize];
+    }
+    if (!font) {
+        // 最后备用：系统粗体
+        font = [NSFont boldSystemFontOfSize:fontSize];
+    }
+    
+    // 计算文字大小以便居中
+    NSDictionary *tempAttributes = @{NSFontAttributeName: font};
+    NSSize textSize = [timeString sizeWithAttributes:tempAttributes];
+    
+    // 计算文字位置（左右居中，上下居中）
+    CGFloat textX = bounds.origin.x + (bounds.size.width - textSize.width) / 2;
+    CGFloat textY = middleStripeCenterY - textSize.height / 2;
+    NSPoint textPoint = NSMakePoint(textX, textY);
+    
+    // 创建渐变图像用于文字填充
+    NSImage *gradientImage = [self createGradientImageWithSize:textSize];
+    
+    // 使用渐变作为文字颜色
+    NSColor *patternColor = [NSColor colorWithPatternImage:gradientImage];
+    
+    // 设置绘图属性
+    NSDictionary *attributes = @{
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: patternColor
+    };
+    
+    // 保存图形状态
+    NSGraphicsContext *context = [NSGraphicsContext currentContext];
+    [context saveGraphicsState];
+    
+    // 设置图案的相位，使渐变与文字位置对齐
+    [[NSGraphicsContext currentContext] setPatternPhase:NSMakePoint(textX, textY)];
+    
+    // 绘制文字
+    [timeString drawAtPoint:textPoint withAttributes:attributes];
+    
+    // 恢复图形状态
+    [context restoreGraphicsState];
+}
+
+// 创建渐变图像
+- (NSImage *)createGradientImageWithSize:(NSSize)size
+{
+    // HSL渐变参数（从深到浅，与条纹相反）
+    CGFloat startHue = 30.0;      // 深色（底部条纹色）
+    CGFloat startSaturation = 68.0;
+    CGFloat startLightness = 52.0;
+    CGFloat endHue = 38.0;        // 浅色（顶部条纹色）
+    CGFloat endSaturation = 80.0;
+    CGFloat endLightness = 93.0;
+    
+    NSImage *image = [[NSImage alloc] initWithSize:size];
+    [image lockFocus];
+    
+    // 创建渐变
+    NSColor *startColor = [self colorFromHSLWithHue:startHue saturation:startSaturation / 100.0 lightness:startLightness / 100.0];
+    NSColor *endColor = [self colorFromHSLWithHue:endHue saturation:endSaturation / 100.0 lightness:endLightness / 100.0];
+    
+    NSGradient *gradient = [[NSGradient alloc] initWithStartingColor:startColor endingColor:endColor];
+    
+    // 绘制渐变（从上到下，深到浅）
+    [gradient drawInRect:NSMakeRect(0, 0, size.width, size.height) angle:90];
+    
+    [image unlockFocus];
+    
+    return image;
+}
+
 - (void)animateOneFrame
 {
     // 更新图形切换时间（每0.05秒更新一次，每1秒切换一次图形，4个图形循环）
@@ -733,7 +998,7 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
         }
     } else {
         // 创建配置窗口
-        NSRect windowRect = NSMakeRect(0, 0, 400, 200);
+        NSRect windowRect = NSMakeRect(0, 0, 400, 250);
         _configureWindow = [[NSWindow alloc] initWithContentRect:windowRect
                                                        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                                          backing:NSBackingStoreBuffered
@@ -745,7 +1010,24 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     // 创建容器视图
     NSView *contentView = _configureWindow.contentView;
     
-    // 创建复选框
+    // 创建屏保类型选择下拉菜单
+    NSTextField *typeLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 170, 100, 22)];
+    [typeLabel setStringValue:@"屏保类型："];
+    [typeLabel setBezeled:NO];
+    [typeLabel setDrawsBackground:NO];
+    [typeLabel setEditable:NO];
+    [typeLabel setSelectable:NO];
+    [contentView addSubview:typeLabel];
+    
+    _screenSaverTypePopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(120, 168, 260, 26)];
+    [_screenSaverTypePopup addItemWithTitle:@"快手图标"];
+    [_screenSaverTypePopup addItemWithTitle:@"Kim年度回顾"];
+    [_screenSaverTypePopup selectItemAtIndex:[self screenSaverType]];
+    [_screenSaverTypePopup setTarget:self];
+    [_screenSaverTypePopup setAction:@selector(screenSaverTypeChanged:)];
+    [contentView addSubview:_screenSaverTypePopup];
+    
+    // 创建"启用动态效果"复选框（快手图标专用）
     _enableAnimationCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(20, 120, 360, 30)];
     [_enableAnimationCheckbox setButtonType:NSButtonTypeSwitch];
     [_enableAnimationCheckbox setTitle:@"启用动态效果"];
@@ -753,6 +1035,18 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     [_enableAnimationCheckbox setTarget:self];
     [_enableAnimationCheckbox setAction:@selector(enableAnimationChanged:)];
     [contentView addSubview:_enableAnimationCheckbox];
+    
+    // 创建"显示时间"复选框（Kim年度回顾专用）
+    _showTimeCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(20, 120, 360, 30)];
+    [_showTimeCheckbox setButtonType:NSButtonTypeSwitch];
+    [_showTimeCheckbox setTitle:@"显示时间"];
+    [_showTimeCheckbox setState:[self isShowTimeEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+    [_showTimeCheckbox setTarget:self];
+    [_showTimeCheckbox setAction:@selector(showTimeChanged:)];
+    [contentView addSubview:_showTimeCheckbox];
+    
+    // 根据当前屏保类型显示/隐藏对应的设置项
+    [self updateSettingsVisibility];
     
     // 创建确定按钮
     NSButton *okButton = [[NSButton alloc] initWithFrame:NSMakeRect(200, 20, 80, 32)];
@@ -775,8 +1069,37 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     return _configureWindow;
 }
 
+// 屏保类型选择改变
+- (void)screenSaverTypeChanged:(id)sender
+{
+    // 根据选择更新设置项的显示/隐藏
+    [self updateSettingsVisibility];
+}
+
+// 更新设置项的显示/隐藏
+- (void)updateSettingsVisibility
+{
+    ScreenSaverType selectedType = (ScreenSaverType)[_screenSaverTypePopup indexOfSelectedItem];
+    
+    if (selectedType == ScreenSaverTypeKuaiShouIcon) {
+        // 快手图标：显示"启用动态效果"，隐藏"显示时间"
+        [_enableAnimationCheckbox setHidden:NO];
+        [_showTimeCheckbox setHidden:YES];
+    } else {
+        // Kim年度回顾：隐藏"启用动态效果"，显示"显示时间"
+        [_enableAnimationCheckbox setHidden:YES];
+        [_showTimeCheckbox setHidden:NO];
+    }
+}
+
 // 复选框状态改变
 - (void)enableAnimationChanged:(id)sender
+{
+    // 实时更新设置（但不保存，直到点击确定）
+}
+
+// 显示时间复选框状态改变
+- (void)showTimeChanged:(id)sender
 {
     // 实时更新设置（但不保存，直到点击确定）
 }
@@ -787,6 +1110,8 @@ static NSString * const kEnableAnimationKey = @"EnableAnimation";
     // 保存设置
     NSUserDefaults *defaults = [ScreenSaverDefaults defaultsForModuleWithName:@"KuaiShouIconScreenSaver"];
     [defaults setBool:([_enableAnimationCheckbox state] == NSControlStateValueOn) forKey:kEnableAnimationKey];
+    [defaults setBool:([_showTimeCheckbox state] == NSControlStateValueOn) forKey:kShowTimeKey];
+    [defaults setInteger:[_screenSaverTypePopup indexOfSelectedItem] forKey:kScreenSaverTypeKey];
     [defaults synchronize];
     
     // 关闭sheet窗口（只调用endSheet，不要调用close，也不要设置为nil）

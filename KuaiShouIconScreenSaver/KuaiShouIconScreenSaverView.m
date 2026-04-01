@@ -21,6 +21,7 @@
     NSTimeInterval _blinkStartTime;     // 当前眨眼开始时间
     NSTimeInterval _blinkDuration;      // 当前眨眼持续时间
     BOOL _isBlinking;                   // 是否正在眨眼
+    NSInteger _remainingBlinks;         // 剩余连续眨眼次数
 }
 
 // 节日结构
@@ -37,6 +38,9 @@ typedef struct {
 static NSString * const kEnableAnimationKey = @"EnableAnimation";
 static NSString * const kScreenSaverTypeKey = @"ScreenSaverType";
 static NSString * const kShowTimeKey = @"ShowTime"; // Kim年度回顾显示时间
+
+// 通知名称
+static NSString * const kScreenSaverSettingsChangedNotification = @"com.KuaiShouIconScreenSaver.SettingsChanged";
 
 // 屏保类型枚举
 typedef NS_ENUM(NSInteger, ScreenSaverType) {
@@ -72,10 +76,17 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
         _shapeSwitchTime = 0.0; // 初始化图形切换时间
 
         // 初始化 Googly Eyes 眨眼变量
-        _nextBlinkTime = [NSDate timeIntervalSinceReferenceDate] + 10.0 + (arc4random() % 51); // 10-60秒后第一次眨眼
+        _nextBlinkTime = [NSDate timeIntervalSinceReferenceDate] + 2.0 + (arc4random() % 40) / 10.0; // 2-6秒后第一次眨眼
         _blinkStartTime = 0;
         _blinkDuration = 0.3;
         _isBlinking = NO;
+        _remainingBlinks = 0;
+
+        // 注册设置变更通知
+        [[NSDistributedNotificationCenter defaultCenter] addObserver:self
+                                                            selector:@selector(settingsChanged:)
+                                                                name:kScreenSaverSettingsChangedNotification
+                                                              object:nil];
     }
     return self;
 }
@@ -117,9 +128,46 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     [self setNeedsDisplay:YES];
 }
 
-- (void)stopAnimation
+- (void)animateOneFrame
 {
-    [super stopAnimation];
+    // 获取当前时间并更新形状切换时间变量（用于morphing动画）
+    NSTimeInterval currentTime = [NSDate timeIntervalSinceReferenceDate];
+    _shapeSwitchTime = currentTime;
+    
+    // 检查眨眼状态
+    if (!_isBlinking && currentTime >= _nextBlinkTime) {
+        // 开始新的眨眼
+        _isBlinking = YES;
+        _blinkStartTime = currentTime;
+        _blinkDuration = 0.2 + (arc4random() % 21) / 100.0; // 0.2-0.4秒随机
+
+        // 如果是新的眨眼序列，随机决定连续眨眼次数：80%概率1次，10%概率2次，10%概率3次
+        if (_remainingBlinks == 0) {
+            NSInteger rand = arc4random() % 100;
+            if (rand < 80) {
+                _remainingBlinks = 1;
+            } else if (rand < 90) {
+                _remainingBlinks = 2;
+            } else {
+                _remainingBlinks = 3;
+            }
+        }
+    }
+    
+    // 触发重绘
+    [self setNeedsDisplay:YES];
+}
+
+- (void)dealloc
+{
+    [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
+}
+
+// 设置变更通知处理
+- (void)settingsChanged:(NSNotification *)notification
+{
+    // 强制刷新显示
+    [self setNeedsDisplay:YES];
 }
 
 // 获取当前时间对应的分钟数（从10:00开始计算）
@@ -1015,11 +1063,14 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     NSDateComponents *components = [calendar components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:now];
     NSInteger currentHour = [components hour];
     NSInteger currentMinute = [components minute];
+    
+    // 将24小时制转换为12小时制
+    NSInteger hour12 = currentHour % 12;
 
-    // 计算布局参数
-    CGFloat eyeRadius = MIN(bounds.size.width, bounds.size.height) * 0.25; // 眼睛半径
-    CGFloat eyeSpacing = eyeRadius * 0.5; // 两眼间距
-    CGFloat pupilRadius = eyeRadius * 0.35; // 瞳孔半径
+    // 计算布局参数 - 缩小眼睛尺寸
+    CGFloat eyeRadius = MIN(bounds.size.width, bounds.size.height) * 0.15; // 眼睛半径（缩小）
+    CGFloat eyeSpacing = eyeRadius * 0.8; // 两眼间距
+    CGFloat pupilRadius = eyeRadius * 0.3; // 瞳孔半径（缩小）
 
     // 计算两个眼睛的中心位置
     NSPoint leftEyeCenter = NSMakePoint(
@@ -1040,8 +1091,15 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
         if (blinkProgress >= 1.0) {
             // 眨眼结束
             _isBlinking = NO;
-            // 设置下一次眨眼时间 (10-60秒随机)
-            _nextBlinkTime = currentTime + 10.0 + (arc4random() % 51);
+            _remainingBlinks--;
+
+            // 如果还有剩余眨眼次数，短暂间隔后继续眨眼
+            if (_remainingBlinks > 0) {
+                _nextBlinkTime = currentTime + 0.1 + (arc4random() % 11) / 100.0; // 0.1-0.2秒后再次眨眼
+            } else {
+                // 设置下一次眨眼时间 (10-60秒随机)
+                _nextBlinkTime = currentTime + 2.0 + (arc4random() % 40) / 10.0; // 2-6秒后下次眨眼
+            }
             blinkClosure = 0.0;
         } else {
             // 闭眼阶段：0.0 -> 0.5 (闭眼), 0.5 -> 1.0 (睁眼)
@@ -1053,28 +1111,22 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
                 blinkClosure = (1.0 - blinkProgress) * 2.0;
             }
         }
-    } else if (currentTime >= _nextBlinkTime) {
-        // 开始新的眨眼
-        _isBlinking = YES;
-        _blinkStartTime = currentTime;
-        _blinkDuration = 0.2 + (arc4random() % 21) / 100.0; // 0.2-0.4秒随机
-        blinkClosure = 0.0;
     }
 
-    // 绘制左眼
+    // 绘制左眼 - 时针角度：-90 + hour12*30 + currentMinute*0.5
+    CGFloat hourAngle = -90.0 + hour12 * 30.0 + currentMinute * 0.5;
     [self drawEyeAtCenter:leftEyeCenter
                eyeRadius:eyeRadius
              pupilRadius:pupilRadius
-               timeValue:currentHour
-               maxValue:23
+                   angle:hourAngle
           blinkClosure:blinkClosure];
 
-    // 绘制右眼
+    // 绘制右眼 - 分针角度：-90 + currentMinute*6
+    CGFloat minuteAngle = -90.0 + currentMinute * 6.0;
     [self drawEyeAtCenter:rightEyeCenter
                eyeRadius:eyeRadius
              pupilRadius:pupilRadius
-               timeValue:currentMinute
-               maxValue:59
+                   angle:minuteAngle
           blinkClosure:blinkClosure];
 }
 
@@ -1082,8 +1134,7 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
 - (void)drawEyeAtCenter:(NSPoint)center
             eyeRadius:(CGFloat)eyeRadius
           pupilRadius:(CGFloat)pupilRadius
-            timeValue:(NSInteger)timeValue
-             maxValue:(NSInteger)maxValue
+                angle:(CGFloat)angle
        blinkClosure:(CGFloat)blinkClosure
 {
     // 绘制眼球（白色背景）
@@ -1115,30 +1166,20 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
             return;
         }
 
-        // 计算瞳孔位置（水平方向根据时间值移动）
-        // 时间值映射到眼球内的水平位置 (-1.0 到 1.0)
-        CGFloat normalizedTime = (CGFloat)timeValue / (CGFloat)maxValue;
-        CGFloat angle = normalizedTime * M_PI * 2 - M_PI / 2; // 从顶部开始顺时针
+        // 计算瞳孔位置 - 角度已从度数转换为弧度，12点方向为-90度
+        // macOS坐标系y轴向下为正，所以sin需要取反（角度传入时已考虑）
+        CGFloat angleInRadians = angle * M_PI / 180.0;
 
-        // 瞳孔在眼球内的移动范围
-        CGFloat maxPupilOffset = eyeRadius * 0.5;
-        CGFloat pupilX = center.x + cos(angle) * maxPupilOffset;
-        CGFloat pupilY = center.y + sin(angle) * maxPupilOffset;
+        // 瞳孔在眼球内的移动范围（增大，使眼球更接近边缘）
+        CGFloat maxPupilOffset = eyeRadius * 0.6;
+        CGFloat pupilX = center.x + cos(angleInRadians) * maxPupilOffset;
+        CGFloat pupilY = center.y - sin(angleInRadians) * maxPupilOffset;
 
-        // 绘制瞳孔（黑色圆形）
+        // 绘制瞳孔（纯黑色圆形，无高光）
         NSBezierPath *pupil = [NSBezierPath bezierPathWithOvalInRect:
             NSMakeRect(pupilX - pupilRadius, pupilY - pupilRadius, pupilRadius * 2, pupilRadius * 2)];
         [[NSColor blackColor] setFill];
         [pupil fill];
-
-        // 绘制瞳孔高光（小白点）
-        CGFloat highlightRadius = pupilRadius * 0.3;
-        CGFloat highlightX = pupilX + pupilRadius * 0.3;
-        CGFloat highlightY = pupilY + pupilRadius * 0.3;
-        NSBezierPath *highlight = [NSBezierPath bezierPathWithOvalInRect:
-            NSMakeRect(highlightX - highlightRadius, highlightY - highlightRadius, highlightRadius * 2, highlightRadius * 2)];
-        [[NSColor whiteColor] setFill];
-        [highlight fill];
     } else {
         // 完全闭合状态 - 画一条横线
         CGFloat lineY = center.y;
@@ -1291,10 +1332,16 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     [defaults setBool:([_showTimeCheckbox state] == NSControlStateValueOn) forKey:kShowTimeKey];
     [defaults setInteger:[_screenSaverTypePopup indexOfSelectedItem] forKey:kScreenSaverTypeKey];
     [defaults synchronize];
-    
+
+    // 发送通知给所有运行的屏保实例（包括系统设置中的预览）
+    [[NSDistributedNotificationCenter defaultCenter] postNotificationName:kScreenSaverSettingsChangedNotification
+                                                                   object:nil
+                                                                 userInfo:nil
+                                                       deliverImmediately:YES];
+
     // 关闭sheet窗口（只调用endSheet，不要调用close，也不要设置为nil）
     [NSApp endSheet:_configureWindow returnCode:NSModalResponseOK];
-    
+
     // 触发重绘
     [self setNeedsDisplay:YES];
 }

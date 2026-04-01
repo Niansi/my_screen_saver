@@ -229,7 +229,12 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     if (solarMonth == 3 && solarDay == 12) {
         [emojis addObjectsFromArray:@[@"🌳", @"🌱", @"🌏"]];
     }
-    
+
+    // 4月1日 愚人节 ❤️‍🩹🤡🧜
+    if (solarMonth == 4 && solarDay == 1) {
+        [emojis addObjectsFromArray:@[@"❤️‍🩹", @"🤡", @"🧜"]];
+    }
+
     // 5月1日 劳动节 🛠️💼🌸
     if (solarMonth == 5 && solarDay == 1) {
         [emojis addObjectsFromArray:@[@"🛠️", @"💼", @"🌸"]];
@@ -249,7 +254,12 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     if (solarMonth == 6 && solarDay == 1) {
         [emojis addObjectsFromArray:@[@"🧸", @"🎈", @"🍭"]];
     }
-    
+
+    // 6月6日 快手周年庆 6️⃣🏋️🥳
+    if (solarMonth == 6 && solarDay == 6) {
+        [emojis addObjectsFromArray:@[@"6️⃣", @"🏋️", @"🥳"]];
+    }
+
     // 6月第3个周日 父亲节 👨‍🦱🛠️💙
     if (solarMonth == 6 && solarWeekday == 1 && solarWeekOrdinal == 3) {
         [emojis addObjectsFromArray:@[@"👨‍🦱", @"🛠️", @"💙"]];

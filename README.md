@@ -28,36 +28,15 @@
 
 ## 安装
 
-### 使用安装脚本（推荐）
+需要 Xcode 和 macOS 开发环境。
 
 ```bash
-bash 安装屏保.sh ~/Downloads/KuaiShouIconScreenSaver.saver
+bash rebuild_screensaver.sh
 ```
 
-脚本会自动移除 macOS 隔离属性并安装到 `~/Library/Screen Savers/`。
+脚本会自动完成：编译 → 安装到 `~/Library/Screen Savers/` → codesign 签名 → 重启屏保引擎。
 
-### 手动安装
-
-1. 双击 `KuaiShouIconScreenSaver.saver` 文件
-2. 系统设置 → 桌面与程序坞 → 屏幕保护程序 → 选择 **KuaiShouIconScreenSaver**
-
-### 遇到"Apple 无法检查其是否包含恶意软件"
-
-macOS Gatekeeper 的正常反应，代码完全开源透明。解决方法任选其一：
-
-**右键打开**（最简单）：右键点击 `.saver` 文件 → 选择「打开」→ 确认打开。
-
-**系统设置放行**：系统设置 → 隐私与安全性 → 底部点击「仍要打开」。
-
-**终端命令**：
-```bash
-sudo xattr -rd com.apple.quarantine ~/Downloads/KuaiShouIconScreenSaver.saver
-```
-
-安装后若仍无法预览，对已安装路径执行同样操作：
-```bash
-sudo xattr -rd com.apple.quarantine ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver
-```
+完成后打开「系统设置 → 桌面与程序坞 → 屏幕保护程序」选择 **KuaiShouIconScreenSaver** 即可。
 
 ---
 
@@ -70,16 +49,6 @@ sudo xattr -rd com.apple.quarantine ~/Library/Screen\ Savers/KuaiShouIconScreenS
 | 屏保类型 | 全部 | 快手图标 / Kim 年度回顾 |
 | 启用动态效果 | 快手图标 | 图形形变动画（20fps） |
 | 显示时间 | Kim 年度回顾 | 在屏幕中央显示当前时间 |
-
----
-
-## 本地构建
-
-```bash
-bash rebuild_screensaver.sh
-```
-
-构建产物自动安装到本机，可在系统设置中立即预览。
 
 ---
 

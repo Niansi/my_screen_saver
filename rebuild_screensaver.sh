@@ -40,17 +40,12 @@ fi
 echo "✍️  重新签名..."
 codesign --force --sign - ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver >/dev/null 2>&1
 
-# 验证安装是否成功
+# 验证安装是否成功（codesign 会修改二进制，不能用 MD5 与原始产物比较）
 if [ -f ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver/Contents/MacOS/KuaiShouIconScreenSaver ]; then
-    INSTALLED_MD5=$(md5 -q ~/Library/Screen\ Savers/KuaiShouIconScreenSaver.saver/Contents/MacOS/KuaiShouIconScreenSaver)
-    BUILT_MD5=$(md5 -q "$BUILD_DIR/KuaiShouIconScreenSaver.saver/Contents/MacOS/KuaiShouIconScreenSaver")
-    if [ "$INSTALLED_MD5" = "$BUILT_MD5" ]; then
-        echo "   ✅ MD5验证通过，安装成功"
-    else
-        echo "   ⚠️  警告：MD5不匹配！可能使用了旧版本"
-        echo "   已安装: $INSTALLED_MD5"
-        echo "   新构建: $BUILT_MD5"
-    fi
+    echo "   ✅ 安装验证通过"
+else
+    echo "   ❌ 安装失败：找不到已安装的二进制"
+    exit 1
 fi
 
 echo "🔄 清理屏保和系统设置缓存..."

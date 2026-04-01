@@ -295,8 +295,11 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
         [emojis addObjectsFromArray:@[@"🎄", @"🎅", @"❄️"]];
     }
     
-    // 农历十二月三十 除夕 🍲🎇🧨
-    if (lunarMonth == 12 && lunarDay == 30) {
+    // 除夕：农历十二月最后一天（大月三十，小月二十九）
+    // 用"明天是正月初一"来判断，避免写死 30 导致小月年份漏掉
+    NSDate *tomorrow = [now dateByAddingTimeInterval:86400];
+    NSDateComponents *tomorrowLunar = [self getLunarDateComponents:tomorrow];
+    if ([tomorrowLunar month] == 1 && [tomorrowLunar day] == 1) {
         [emojis addObjectsFromArray:@[@"🍲", @"🎇", @"🧨"]];
     }
     

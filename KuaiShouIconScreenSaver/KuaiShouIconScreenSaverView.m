@@ -220,8 +220,8 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
         [emojis addObjectsFromArray:@[@"🧨", @"🏮", @"🥟"]];
     }
     
-    // 农历2月14日 情人节 ❤️🌹💌
-    if (lunarMonth == 2 && lunarDay == 14) {
+    // 2月14日 情人节 ❤️🌹💌
+    if (solarMonth == 2 && solarDay == 14) {
         [emojis addObjectsFromArray:@[@"❤️", @"🌹", @"💌"]];
     }
     

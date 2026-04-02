@@ -22,6 +22,13 @@
     NSTimeInterval _blinkDuration;      // 当前眨眼持续时间
     BOOL _isBlinking;                   // 是否正在眨眼
     NSInteger _remainingBlinks;         // 剩余连续眨眼次数
+    
+    // 文学时钟缓存和过渡动画
+    NSString *_cachedTimeStamp;         // 缓存的时间戳
+    NSDictionary *_cachedQuote;         // 缓存的引用
+    NSDictionary *_previousQuote;       // 上一个引用（用于过渡动画）
+    CGFloat _quoteTransitionProgress;   // 过渡进度 (0.0 - 1.0)
+    BOOL _isTransitioning;              // 是否正在过渡
 }
 
 // 节日结构
@@ -46,7 +53,8 @@ static NSString * const kScreenSaverSettingsChangedNotification = @"com.KuaiShou
 typedef NS_ENUM(NSInteger, ScreenSaverType) {
     ScreenSaverTypeKuaiShouIcon = 0,  // 快手图标
     ScreenSaverTypeKimAnnualReview = 1, // Kim年度回顾
-    ScreenSaverTypeGooglyEyes = 2     // Googly Eyes
+    ScreenSaverTypeGooglyEyes = 2,    // Googly Eyes
+    ScreenSaverTypeLiteratureClock = 3  // 文学时钟
 };
 
 // 快手橙色 RGB(255, 85, 0)
@@ -133,6 +141,16 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     // 获取当前时间并更新形状切换时间变量（用于morphing动画）
     NSTimeInterval currentTime = [NSDate timeIntervalSinceReferenceDate];
     _shapeSwitchTime = currentTime;
+    
+    // 更新文学时钟引用过渡动画
+    if (_isTransitioning) {
+        _quoteTransitionProgress += 0.15; // 每帧增加15%进度，约0.3秒完成过渡
+        if (_quoteTransitionProgress >= 1.0) {
+            _quoteTransitionProgress = 1.0;
+            _isTransitioning = NO;
+            _previousQuote = nil;
+        }
+    }
     
     // 检查眨眼状态
     if (!_isBlinking && currentTime >= _nextBlinkTime) {
@@ -654,6 +672,8 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
         [self drawKimAnnualReviewStyle:rect];
     } else if (type == ScreenSaverTypeGooglyEyes) {
         [self drawGooglyEyesStyle:rect];
+    } else if (type == ScreenSaverTypeLiteratureClock) {
+        [self drawLiteratureClockStyle:rect];
     } else {
         [self drawKuaiShouIconStyle:rect];
     }
@@ -1192,6 +1212,301 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     }
 }
 
+
+
+// 从 bundle 加载字体（首次使用时注册到系统，之后直接复用）
+- (NSFont *)loadFontFromBundle:(NSString *)fontName size:(CGFloat)size
+{
+    // 先尝试系统字体
+    NSFont *font = [NSFont fontWithName:fontName size:size];
+    if (font) {
+        return font;
+    }
+
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSArray<NSString *> *fontFiles = @[@"Merriweather-Regular", @"Merriweather-Bold", @"Merriweather-Black"];
+        for (NSString *fileName in fontFiles) {
+            NSString *fontPath = [[NSBundle bundleForClass:[self class]] pathForResource:fileName ofType:@"ttf" inDirectory:@"Fonts"];
+            if (!fontPath) {
+                fontPath = [[NSBundle bundleForClass:[self class]] pathForResource:fileName ofType:@"ttf"];
+            }
+            if (!fontPath) continue;
+
+            NSData *fontData = [NSData dataWithContentsOfFile:fontPath];
+            if (!fontData) continue;
+
+            CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)fontData);
+            if (!provider) continue;
+
+            CGFontRef cgFont = CGFontCreateWithDataProvider(provider);
+            CGDataProviderRelease(provider);
+            if (!cgFont) continue;
+
+            CFErrorRef error = NULL;
+            CTFontManagerRegisterGraphicsFont(cgFont, &error);
+            CGFontRelease(cgFont);
+        }
+    });
+
+    // 注册完成后再次尝试加载
+    return [NSFont fontWithName:fontName size:size];
+}
+
+// 绘制文学时钟样式
+- (void)drawLiteratureClockStyle:(NSRect)rect
+{
+    NSRect bounds = [self bounds];
+
+    // 检查bounds是否有效
+    if (bounds.size.width <= 0 || bounds.size.height <= 0) {
+        return;
+    }
+
+    // 设置背景色
+    [[NSColor colorWithCalibratedRed:0.094 green:0.102 blue:0.106 alpha:1.0] setFill];
+    NSRectFill(rect);
+
+    // 获取当前时间
+    NSCalendar *calendar = [NSCalendar currentCalendar];
+    NSDate *now = [NSDate date];
+    NSDateComponents *components = [calendar components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:now];
+    NSInteger currentHour = [components hour];
+    NSInteger currentMinute = [components minute];
+
+    // 格式化时间字符串 HH_MM (24小时制)
+    NSString *timeStamp = [NSString stringWithFormat:@"%02ld_%02ld", (long)currentHour, (long)currentMinute];
+
+    // 检查是否需要重新加载（时间变化或首次加载）
+    BOOL needReload = (!_cachedTimeStamp || ![_cachedTimeStamp isEqualToString:timeStamp] || !_cachedQuote);
+
+    // 如果检测到时间变化，启动过渡动画
+    if (needReload && _cachedQuote && !_isTransitioning) {
+        _previousQuote = _cachedQuote;
+        _isTransitioning = YES;
+        _quoteTransitionProgress = 0.0;
+    }
+
+    if (needReload) {
+        // 更新时间戳缓存
+        _cachedTimeStamp = timeStamp;
+
+        // 加载对应时间的JSON文件 (24小时制)
+        NSString *jsonPath = [[NSBundle bundleForClass:[self class]] pathForResource:timeStamp ofType:@"json"];
+
+        // 如果找不到24小时制的素材，尝试12小时制
+        if (!jsonPath) {
+            NSInteger hour12 = currentHour % 12;
+            NSString *timeStamp12 = [NSString stringWithFormat:@"%02ld_%02ld", (long)hour12, (long)currentMinute];
+            jsonPath = [[NSBundle bundleForClass:[self class]] pathForResource:timeStamp12 ofType:@"json"];
+        }
+
+        if (jsonPath) {
+            NSData *jsonData = [NSData dataWithContentsOfFile:jsonPath];
+            if (jsonData) {
+                NSError *error = nil;
+                NSArray *jsonArray = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&error];
+
+                if (!error && [jsonArray count] > 0) {
+                    // 随机选择一条引用
+                    NSUInteger randomIndex = arc4random_uniform((uint32_t)[jsonArray count]);
+                    _cachedQuote = jsonArray[randomIndex];
+                }
+            }
+        } else {
+            _cachedQuote = nil;
+        }
+    }
+
+    // 设置颜色
+    NSColor *quoteColor = [NSColor colorWithCalibratedRed:0.651 green:0.620 blue:0.573 alpha:1.0];
+    NSColor *timeColor = [NSColor colorWithCalibratedRed:0.863 green:0.851 blue:0.831 alpha:1.0];
+
+    // 如果有过渡动画，先绘制上一个引用（渐隐）
+    if (_isTransitioning && _previousQuote) {
+        CGFloat fadeOutAlpha = 1.0 - _quoteTransitionProgress;
+        [self drawQuote:_previousQuote
+                 inRect:bounds
+          withBaseColor:quoteColor
+              timeColor:timeColor
+                  alpha:fadeOutAlpha];
+    }
+
+    // 绘制当前引用（渐出）
+    if (_cachedQuote) {
+        CGFloat fadeInAlpha = _isTransitioning ? _quoteTransitionProgress : 1.0;
+        [self drawQuote:_cachedQuote
+                 inRect:bounds
+          withBaseColor:quoteColor
+              timeColor:timeColor
+                  alpha:fadeInAlpha];
+    } else {
+        // 如果没有找到引用，显示默认文本
+        NSString *defaultQuote = [NSString stringWithFormat:@"The time is %02ld:%02ld.", (long)currentHour, (long)currentMinute];
+        NSFont *font = [NSFont fontWithName:@"Georgia" size:32.0] ?: [NSFont systemFontOfSize:32.0];
+        NSMutableParagraphStyle *style = [[NSMutableParagraphStyle alloc] init];
+        [style setAlignment:NSTextAlignmentCenter];
+
+        NSDictionary *attrs = @{
+            NSFontAttributeName: font,
+            NSForegroundColorAttributeName: timeColor,
+            NSParagraphStyleAttributeName: style
+        };
+
+        NSAttributedString *text = [[NSAttributedString alloc] initWithString:defaultQuote attributes:attrs];
+        NSRect textRect = NSMakeRect(bounds.origin.x + 50,
+                                      bounds.origin.y + (bounds.size.height - 40) / 2,
+                                      bounds.size.width - 100, 40);
+        [text drawInRect:textRect];
+    }
+}
+
+// 绘制单个引用（支持透明度）
+- (void)drawQuote:(NSDictionary *)quote
+           inRect:(NSRect)bounds
+    withBaseColor:(NSColor *)baseColor
+        timeColor:(NSColor *)timeColor
+            alpha:(CGFloat)alpha
+{
+    if (!quote) return;
+
+    NSString *quoteFirst = quote[@"quote_first"] ?: @"";
+    NSString *quoteTimeCase = quote[@"quote_time_case"] ?: @"";
+    NSString *quoteLast = quote[@"quote_last"] ?: @"";
+    NSString *title = quote[@"title"] ?: @"";
+    NSString *author = quote[@"author"] ?: @"";
+
+    // 将 HTML 换行标签替换为换行符
+    quoteFirst = [quoteFirst stringByReplacingOccurrencesOfString:@"<br/>" withString:@"\n"];
+    quoteFirst = [quoteFirst stringByReplacingOccurrencesOfString:@"<br>" withString:@"\n"];
+    quoteLast = [quoteLast stringByReplacingOccurrencesOfString:@"<br/>" withString:@"\n"];
+    quoteLast = [quoteLast stringByReplacingOccurrencesOfString:@"<br>" withString:@"\n"];
+
+    // 计算引用总长度以确定字体大小
+    NSString *fullQuote = [NSString stringWithFormat:@"%@%@%@", quoteFirst, quoteTimeCase, quoteLast];
+    NSInteger quoteLen = [fullQuote length];
+
+    // 根据引用长度计算字体大小 (参考原网页的公式)
+    CGFloat fontSizeVW = 6.190864 - 0.01211676 * quoteLen + 0.00001176814 * quoteLen * quoteLen - 1.969435e-9 * quoteLen * quoteLen * quoteLen;
+    CGFloat baseFontSize = fontSizeVW * bounds.size.width / 100.0;
+
+    // 限制字体大小范围
+    baseFontSize = MAX(16.0, MIN(baseFontSize, 48.0));
+
+    // 应用透明度到颜色
+    NSColor *quoteColorWithAlpha = [baseColor colorWithAlphaComponent:alpha];
+    NSColor *timeColorWithAlpha = [timeColor colorWithAlphaComponent:alpha];
+    NSColor *citeColorWithAlpha = [[NSColor colorWithCalibratedRed:0.651 green:0.620 blue:0.573 alpha:1.0] colorWithAlphaComponent:alpha];
+
+    // 绘制引用文本 - 优先从 bundle 加载 Merriweather
+    NSFont *quoteFont = [self loadFontFromBundle:@"Merriweather" size:baseFontSize];
+    if (!quoteFont) {
+        quoteFont = [NSFont fontWithName:@"Georgia" size:baseFontSize];
+    }
+    if (!quoteFont) {
+        quoteFont = [NSFont systemFontOfSize:baseFontSize];
+    }
+
+    // 设置段落样式
+    NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+    [paragraphStyle setAlignment:NSTextAlignmentCenter];
+
+    // 构建引用富文本
+    NSMutableAttributedString *quoteText = [[NSMutableAttributedString alloc] init];
+
+    // 添加 quote_first
+    if ([quoteFirst length] > 0) {
+        NSAttributedString *firstPart = [[NSAttributedString alloc] initWithString:quoteFirst
+                                                                        attributes:@{
+                                                                            NSFontAttributeName: quoteFont,
+                                                                            NSForegroundColorAttributeName: quoteColorWithAlpha,
+                                                                            NSParagraphStyleAttributeName: paragraphStyle
+                                                                        }];
+        [quoteText appendAttributedString:firstPart];
+    }
+
+    // 添加 quote_time_case (高亮)
+    if ([quoteTimeCase length] > 0) {
+        NSFont *heavyFont = [self loadFontFromBundle:@"Merriweather-Black" size:baseFontSize];
+        if (!heavyFont) {
+            heavyFont = [NSFont fontWithName:@"Georgia-Bold" size:baseFontSize];
+        }
+        if (!heavyFont) {
+            heavyFont = [[NSFontManager sharedFontManager] convertFont:quoteFont toHaveTrait:NSBoldFontMask];
+        }
+        if (!heavyFont) {
+            heavyFont = quoteFont;
+        }
+        NSAttributedString *timePart = [[NSAttributedString alloc] initWithString:quoteTimeCase
+                                                                       attributes:@{
+                                                                           NSFontAttributeName: heavyFont,
+                                                                           NSForegroundColorAttributeName: timeColorWithAlpha
+                                                                       }];
+        [quoteText appendAttributedString:timePart];
+    }
+
+    // 添加 quote_last
+    if ([quoteLast length] > 0) {
+        NSAttributedString *lastPart = [[NSAttributedString alloc] initWithString:quoteLast
+                                                                       attributes:@{
+                                                                           NSFontAttributeName: quoteFont,
+                                                                           NSForegroundColorAttributeName: quoteColorWithAlpha,
+                                                                           NSParagraphStyleAttributeName: paragraphStyle
+                                                                        }];
+        [quoteText appendAttributedString:lastPart];
+    }
+
+    // 计算引用文本的绘制区域
+    CGFloat margin = bounds.size.width * 0.1;
+    CGFloat maxTextWidth = bounds.size.width * 0.8;
+
+    NSSize quoteSize = [quoteText boundingRectWithSize:NSMakeSize(maxTextWidth, CGFLOAT_MAX)
+                                               options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                               context:nil].size;
+
+    CGFloat quoteY = bounds.origin.y + (bounds.size.height - quoteSize.height) / 2 + 20;
+    NSRect quoteRect = NSMakeRect(bounds.origin.x + margin, quoteY, maxTextWidth, quoteSize.height);
+
+    [quoteText drawWithRect:quoteRect
+                    options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                    context:nil];
+
+    // 绘制书名和作者
+    NSString *citeText = [NSString stringWithFormat:@"- %@, %@", title, author];
+    CGFloat citeFontSize = baseFontSize * 0.5;
+    NSFont *citeFont = [self loadFontFromBundle:@"Merriweather" size:citeFontSize];
+    if (!citeFont) {
+        citeFont = [NSFont fontWithName:@"Georgia" size:citeFontSize];
+    }
+    if (!citeFont) {
+        citeFont = [NSFont systemFontOfSize:citeFontSize];
+    }
+
+    NSMutableParagraphStyle *citeParagraphStyle = [[NSMutableParagraphStyle alloc] init];
+    [citeParagraphStyle setAlignment:NSTextAlignmentRight];
+
+    NSDictionary *citeAttributes = @{
+        NSFontAttributeName: citeFont,
+        NSForegroundColorAttributeName: citeColorWithAlpha,
+        NSParagraphStyleAttributeName: citeParagraphStyle
+    };
+
+    NSAttributedString *citeAttributedText = [[NSAttributedString alloc] initWithString:citeText
+                                                                             attributes:citeAttributes];
+
+    NSSize citeSize = [citeAttributedText boundingRectWithSize:NSMakeSize(maxTextWidth, CGFLOAT_MAX)
+                                                        options:NSStringDrawingUsesLineFragmentOrigin
+                                                        context:nil].size;
+
+    CGFloat citeY = quoteY - citeSize.height - 30;
+    CGFloat citeRightPadding = bounds.size.width * 0.1;
+    NSRect citeRect = NSMakeRect(bounds.origin.x + citeRightPadding, citeY,
+                                  bounds.size.width - citeRightPadding * 2, citeSize.height);
+
+    [citeAttributedText drawWithRect:citeRect
+                             options:NSStringDrawingUsesLineFragmentOrigin
+                             context:nil];
+}
 - (BOOL)hasConfigureSheet
 {
     return YES;
@@ -1237,6 +1552,7 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
     [_screenSaverTypePopup addItemWithTitle:@"快手图标"];
     [_screenSaverTypePopup addItemWithTitle:@"Kim年度回顾"];
     [_screenSaverTypePopup addItemWithTitle:@"Googly Eyes"];
+    [_screenSaverTypePopup addItemWithTitle:@"文学时钟"];
     [_screenSaverTypePopup selectItemAtIndex:[self screenSaverType]];
     [_screenSaverTypePopup setTarget:self];
     [_screenSaverTypePopup setAction:@selector(screenSaverTypeChanged:)];
@@ -1304,8 +1620,12 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
         // Kim年度回顾：隐藏"启用动态效果"，显示"显示时间"
         [_enableAnimationCheckbox setHidden:YES];
         [_showTimeCheckbox setHidden:NO];
-    } else {
+    } else if (selectedType == ScreenSaverTypeGooglyEyes) {
         // Googly Eyes：隐藏所有附加设置
+        [_enableAnimationCheckbox setHidden:YES];
+        [_showTimeCheckbox setHidden:YES];
+    } else {
+        // 文学时钟：隐藏所有附加设置
         [_enableAnimationCheckbox setHidden:YES];
         [_showTimeCheckbox setHidden:YES];
     }

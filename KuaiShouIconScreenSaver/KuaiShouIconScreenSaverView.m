@@ -11,10 +11,11 @@
 
 @implementation KuaiShouIconScreenSaverView {
     NSTimeInterval _shapeSwitchTime; // 用于特殊位置图形切换的时间变量
-    NSWindow *_configureWindow; // 配置窗口
+    NSWindow *_configureWindow; // 配置窗口（使用弱引用语义管理）
     NSButton *_enableAnimationCheckbox; // 启用动效的复选框（快手图标用）
     NSButton *_showTimeCheckbox; // 显示时间的复选框（Kim年度回顾用）
     NSPopUpButton *_screenSaverTypePopup; // 屏保类型选择下拉菜单
+    BOOL _isConfigSheetOpen; // 标记配置窗口是否正在显示
 
     // Googly Eyes 眨眼动画相关
     NSTimeInterval _nextBlinkTime;      // 下一次眨眼的时间
@@ -1514,27 +1515,34 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
 
 - (NSWindow*)configureSheet
 {
-    // 如果窗口已存在且仍然可见，直接返回
-    if (_configureWindow && [_configureWindow isVisible]) {
+    // 如果窗口正在显示，直接返回（避免重复打开）
+    if (_isConfigSheetOpen && _configureWindow) {
         return _configureWindow;
     }
     
-    // 如果窗口已存在但不可见，清理子视图以便重新使用
+    // 清理旧的窗口引用（如果存在）
     if (_configureWindow) {
-        NSArray *subviews = [[_configureWindow.contentView subviews] copy];
-        for (NSView *subview in subviews) {
-            [subview removeFromSuperview];
+        // 确保窗口已关闭并清理
+        if ([_configureWindow isVisible]) {
+            [_configureWindow close];
         }
-    } else {
-        // 创建配置窗口
-        NSRect windowRect = NSMakeRect(0, 0, 400, 250);
-        _configureWindow = [[NSWindow alloc] initWithContentRect:windowRect
-                                                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
-                                                         backing:NSBackingStoreBuffered
-                                                           defer:NO];
-        [_configureWindow setTitle:@"快手图标屏保设置"];
-        [_configureWindow center];
+        _configureWindow = nil;
     }
+    
+    // 标记配置窗口为打开状态
+    _isConfigSheetOpen = YES;
+    
+    // 创建新的配置窗口
+    NSRect windowRect = NSMakeRect(0, 0, 400, 250);
+    _configureWindow = [[NSWindow alloc] initWithContentRect:windowRect
+                                                   styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                                                     backing:NSBackingStoreBuffered
+                                                       defer:NO];
+    [_configureWindow setTitle:@"快手图标屏保设置"];
+    [_configureWindow center];
+    
+    // 设置窗口代理，在窗口关闭时清理状态
+    [_configureWindow setDelegate:self];
     
     // 创建容器视图
     NSView *contentView = _configureWindow.contentView;
@@ -1659,8 +1667,12 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
                                                                  userInfo:nil
                                                        deliverImmediately:YES];
 
-    // 关闭sheet窗口（只调用endSheet，不要调用close，也不要设置为nil）
+    // 关闭sheet窗口
     [NSApp endSheet:_configureWindow returnCode:NSModalResponseOK];
+    
+    // 清理状态
+    _isConfigSheetOpen = NO;
+    _configureWindow = nil;
 
     // 触发重绘
     [self setNeedsDisplay:YES];
@@ -1669,8 +1681,23 @@ typedef NS_ENUM(NSInteger, ScreenSaverType) {
 // 取消按钮点击
 - (void)cancelButtonClicked:(id)sender
 {
-    // 关闭sheet窗口，不保存设置（只调用endSheet，不要调用close，也不要设置为nil）
+    // 关闭sheet窗口，不保存设置
     [NSApp endSheet:_configureWindow returnCode:NSModalResponseCancel];
+    
+    // 清理状态
+    _isConfigSheetOpen = NO;
+    _configureWindow = nil;
+}
+
+#pragma mark - NSWindowDelegate
+
+// 窗口关闭时的回调（处理用户点击窗口关闭按钮的情况）
+- (void)windowWillClose:(NSNotification *)notification
+{
+    if (notification.object == _configureWindow) {
+        _isConfigSheetOpen = NO;
+        _configureWindow = nil;
+    }
 }
 
 @end

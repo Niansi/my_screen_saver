@@ -7,6 +7,6 @@
 
 #import <ScreenSaver/ScreenSaver.h>
 
-@interface KuaiShouIconScreenSaverView : ScreenSaverView
+@interface KuaiShouIconScreenSaverView : ScreenSaverView <NSWindowDelegate>
 
 @end
